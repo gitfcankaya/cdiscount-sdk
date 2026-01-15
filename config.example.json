@@ -1,0 +1,10 @@
+{
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "grant_type": "client_credentials",
+    "base_url_token": "https://auth.octopia-io.net",
+    "base_url": "https://api.octopia-io.net/seller/v2",
+    "seller_id": "YOUR_SELLER_ID",
+    "timeout": 30,
+    "debug": false
+}

@@ -1,0 +1,46 @@
+{
+    "name": "cdiscount/octopia-sdk",
+    "description": "PHP SDK for Octopia Seller API V2 - CDiscount Marketplace Integration",
+    "version": "1.0.0",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "cdiscount",
+        "octopia",
+        "marketplace",
+        "api",
+        "sdk",
+        "e-commerce"
+    ],
+    "authors": [
+        {
+            "name": "CDiscount SDK",
+            "email": "developer@example.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-json": "*",
+        "ext-curl": "*",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "CDiscount\\Sdk\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CDiscount\\Sdk\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    }
+}

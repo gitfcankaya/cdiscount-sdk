@@ -1,0 +1,34 @@
+# Vendor directory
+/vendor/
+
+# Composer files
+composer.lock
+
+# IDE files
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Configuration files with credentials
+config.json
+
+# Log files
+*.log
+
+# Cache
+/cache/
+/.cache/
+
+# Test coverage
+/coverage/
+.phpunit.result.cache
+
+# Build artifacts
+/build/
+/dist/
