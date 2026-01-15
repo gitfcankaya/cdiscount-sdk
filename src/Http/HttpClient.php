@@ -55,8 +55,11 @@ class HttpClient
      */
     private function initializeClients(): void
     {
+        // Ensure base_uri ends with '/' for proper path resolution
+        $baseUrl = rtrim($this->config->getBaseUrl(), '/') . '/';
+        
         $this->client = new Client([
-            'base_uri' => $this->config->getBaseUrl(),
+            'base_uri' => $baseUrl,
             'timeout' => $this->config->getTimeout(),
             'http_errors' => false,
             'verify' => true,
@@ -201,6 +204,9 @@ class HttpClient
     public function request(string $method, string $endpoint, array $options = [], int $retryCount = 0): ApiResponse
     {
         $token = $this->authenticate();
+
+        // Normalize endpoint - remove leading slash for proper base_uri concatenation
+        $endpoint = ltrim($endpoint, '/');
 
         $defaultHeaders = [
             'Authorization' => 'Bearer ' . $token,
