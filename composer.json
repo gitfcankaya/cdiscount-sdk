@@ -1,23 +1,30 @@
 {
-    "name": "cdiscount/octopia-sdk",
+    "name": "gitfcankaya/cdiscount-sdk",
     "description": "PHP SDK for Octopia Seller API V2 - CDiscount Marketplace Integration",
     "version": "1.0.0",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/gitfcankaya/cdiscount-sdk",
     "keywords": [
         "cdiscount",
         "octopia",
         "marketplace",
         "api",
         "sdk",
-        "e-commerce"
+        "e-commerce",
+        "seller",
+        "php"
     ],
     "authors": [
         {
-            "name": "CDiscount SDK",
-            "email": "developer@example.com"
+            "name": "gitfcankaya",
+            "homepage": "https://github.com/gitfcankaya"
         }
     ],
+    "support": {
+        "issues": "https://github.com/gitfcankaya/cdiscount-sdk/issues",
+        "source": "https://github.com/gitfcankaya/cdiscount-sdk"
+    },
     "require": {
         "php": ">=7.4",
         "ext-json": "*",
