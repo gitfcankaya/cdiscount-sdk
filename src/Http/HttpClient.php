@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CDiscount\Sdk\Http;
 
+use CDiscount\Sdk\Cache\TokenCache;
 use CDiscount\Sdk\Config\Configuration;
 use CDiscount\Sdk\Exception\ApiException;
 use CDiscount\Sdk\Exception\AuthenticationException;
@@ -28,14 +29,22 @@ class HttpClient
     /** @var Client */
     private $authClient;
 
+    /** @var TokenCache */
+    private $tokenCache;
+
+    /** @var int Maximum retry attempts for token refresh */
+    private const MAX_RETRY_ATTEMPTS = 1;
+
     /**
      * HttpClient constructor
      *
      * @param Configuration $config
+     * @param TokenCache|null $tokenCache
      */
-    public function __construct(Configuration $config)
+    public function __construct(Configuration $config, ?TokenCache $tokenCache = null)
     {
         $this->config = $config;
+        $this->tokenCache = $tokenCache ?? new TokenCache();
         $this->initializeClients();
     }
 
@@ -63,20 +72,66 @@ class HttpClient
 
     /**
      * Authenticate and get access token
+     * First checks file cache, then memory, then requests new token
+     *
+     * @param bool $forceRefresh Force a new token request
+     * @return string
+     * @throws AuthenticationException
+     */
+    public function authenticate(bool $forceRefresh = false): string
+    {
+        $clientId = $this->config->getClientId();
+
+        // If force refresh, clear cached token
+        if ($forceRefresh) {
+            $this->tokenCache->delete($clientId);
+            $this->config->clearToken();
+        }
+
+        // 1. Check memory cache first (fastest)
+        if (!$forceRefresh && $this->config->isTokenValid()) {
+            return $this->config->getAccessToken();
+        }
+
+        // 2. Check file cache (persists across requests)
+        if (!$forceRefresh) {
+            $cachedToken = $this->tokenCache->getValidToken($clientId);
+            if ($cachedToken !== null) {
+                // Load into memory cache
+                $expiresAt = $this->tokenCache->getExpiresAt($clientId);
+                $remainingTime = $expiresAt - time();
+                $this->config->setAccessToken($cachedToken, $remainingTime);
+
+                if ($this->config->isDebug()) {
+                    $this->logDebug("Token loaded from file cache. Expires at: " . date('Y-m-d H:i:s', $expiresAt));
+                }
+
+                return $cachedToken;
+            }
+        }
+
+        // 3. Request new token from OAuth server
+        return $this->requestNewToken();
+    }
+
+    /**
+     * Request a new token from the OAuth server
      *
      * @return string
      * @throws AuthenticationException
      */
-    public function authenticate(): string
+    private function requestNewToken(): string
     {
-        if ($this->config->isTokenValid()) {
-            return $this->config->getAccessToken();
+        $clientId = $this->config->getClientId();
+
+        if ($this->config->isDebug()) {
+            $this->logDebug("Requesting new token from OAuth server...");
         }
 
         try {
             $response = $this->authClient->post('/auth/realms/maas/protocol/openid-connect/token', [
                 RequestOptions::FORM_PARAMS => [
-                    'client_id' => $this->config->getClientId(),
+                    'client_id' => $clientId,
                     'client_secret' => $this->config->getClientSecret(),
                     'grant_type' => $this->config->getGrantType(),
                 ],
@@ -98,12 +153,20 @@ class HttpClient
                 throw new AuthenticationException('No access token in response');
             }
 
-            $this->config->setAccessToken(
-                $data['access_token'],
-                (int) ($data['expires_in'] ?? 7200)
-            );
+            $accessToken = $data['access_token'];
+            $expiresIn = (int) ($data['expires_in'] ?? 7200);
 
-            return $data['access_token'];
+            // Save to memory cache
+            $this->config->setAccessToken($accessToken, $expiresIn);
+
+            // Save to file cache
+            $this->tokenCache->save($clientId, $accessToken, $expiresIn);
+
+            if ($this->config->isDebug()) {
+                $this->logDebug("New token obtained. Expires in: {$expiresIn} seconds");
+            }
+
+            return $accessToken;
         } catch (GuzzleException $e) {
             throw new AuthenticationException(
                 'Authentication request failed: ' . $e->getMessage(),
@@ -114,16 +177,28 @@ class HttpClient
     }
 
     /**
-     * Make API request
+     * Refresh the token (force new token request)
+     *
+     * @return string
+     * @throws AuthenticationException
+     */
+    public function refreshToken(): string
+    {
+        return $this->authenticate(true);
+    }
+
+    /**
+     * Make API request with automatic token refresh on 401
      *
      * @param string $method
      * @param string $endpoint
      * @param array $options
+     * @param int $retryCount
      * @return ApiResponse
      * @throws ApiException
      * @throws AuthenticationException
      */
-    public function request(string $method, string $endpoint, array $options = []): ApiResponse
+    public function request(string $method, string $endpoint, array $options = [], int $retryCount = 0): ApiResponse
     {
         $token = $this->authenticate();
 
@@ -143,9 +218,35 @@ class HttpClient
 
         try {
             $response = $this->client->request($method, $endpoint, $options);
+            $statusCode = $response->getStatusCode();
+
+            // Handle 401 Unauthorized - Token might be invalid/expired
+            if ($statusCode === 401 && $retryCount < self::MAX_RETRY_ATTEMPTS) {
+                if ($this->config->isDebug()) {
+                    $this->logDebug("Received 401 Unauthorized. Refreshing token and retrying...");
+                }
+
+                // Force refresh token and retry
+                $this->refreshToken();
+                return $this->request($method, $endpoint, $options, $retryCount + 1);
+            }
+
             return $this->handleResponse($response);
         } catch (RequestException $e) {
             if ($e->hasResponse()) {
+                $statusCode = $e->getResponse()->getStatusCode();
+
+                // Handle 401 Unauthorized - Token might be invalid/expired
+                if ($statusCode === 401 && $retryCount < self::MAX_RETRY_ATTEMPTS) {
+                    if ($this->config->isDebug()) {
+                        $this->logDebug("Received 401 Unauthorized. Refreshing token and retrying...");
+                    }
+
+                    // Force refresh token and retry
+                    $this->refreshToken();
+                    return $this->request($method, $endpoint, $options, $retryCount + 1);
+                }
+
                 return $this->handleResponse($e->getResponse());
             }
             throw new ApiException(
@@ -354,6 +455,16 @@ class HttpClient
     }
 
     /**
+     * Get token cache
+     *
+     * @return TokenCache
+     */
+    public function getTokenCache(): TokenCache
+    {
+        return $this->tokenCache;
+    }
+
+    /**
      * Set seller ID for requests
      *
      * @param string $sellerId
@@ -362,6 +473,53 @@ class HttpClient
     public function setSellerId(string $sellerId): self
     {
         $this->config->setSellerId($sellerId);
+        return $this;
+    }
+
+    /**
+     * Log debug message
+     *
+     * @param string $message
+     * @return void
+     */
+    private function logDebug(string $message): void
+    {
+        if ($this->config->isDebug()) {
+            error_log("[CDiscount SDK] " . date('Y-m-d H:i:s') . " - " . $message);
+        }
+    }
+
+    /**
+     * Get token info for debugging
+     *
+     * @return array
+     */
+    public function getTokenInfo(): array
+    {
+        $clientId = $this->config->getClientId();
+
+        return [
+            'has_memory_token' => $this->config->getAccessToken() !== null,
+            'memory_token_valid' => $this->config->isTokenValid(),
+            'has_file_token' => $this->tokenCache->hasValidToken($clientId),
+            'file_token_expires_at' => $this->tokenCache->getExpiresAt($clientId),
+            'file_token_expires_at_readable' => $this->tokenCache->getExpiresAt($clientId)
+                ? date('Y-m-d H:i:s', $this->tokenCache->getExpiresAt($clientId))
+                : null,
+            'file_token_remaining_seconds' => $this->tokenCache->getRemainingLifetime($clientId),
+            'cache_file_path' => $this->tokenCache->getCacheFilePath(),
+        ];
+    }
+
+    /**
+     * Clear all cached tokens (both memory and file)
+     *
+     * @return $this
+     */
+    public function clearAllTokens(): self
+    {
+        $this->config->clearToken();
+        $this->tokenCache->delete($this->config->getClientId());
         return $this;
     }
 }

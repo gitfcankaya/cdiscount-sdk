@@ -12,6 +12,7 @@ use CDiscount\Sdk\Api\OrderInvoicesApi;
 use CDiscount\Sdk\Api\OrdersApi;
 use CDiscount\Sdk\Api\ProductsApi;
 use CDiscount\Sdk\Api\SellerApi;
+use CDiscount\Sdk\Cache\TokenCache;
 use CDiscount\Sdk\Config\Configuration;
 use CDiscount\Sdk\Http\HttpClient;
 
@@ -57,11 +58,12 @@ class CDiscountClient
      * CDiscountClient constructor
      *
      * @param Configuration $config
+     * @param TokenCache|null $tokenCache Optional token cache instance
      */
-    public function __construct(Configuration $config)
+    public function __construct(Configuration $config, ?TokenCache $tokenCache = null)
     {
         $this->config = $config;
-        $this->httpClient = new HttpClient($config);
+        $this->httpClient = new HttpClient($config, $tokenCache);
         $this->initializeApis();
     }
 
@@ -77,22 +79,30 @@ class CDiscountClient
      *   - seller_id: string (optional)
      *   - timeout: int (default: 30)
      *   - debug: bool (default: false)
+     *   - token_cache_path: string (optional) Path to token cache file
      * @return static
      */
     public static function create(array $config): self
     {
-        return new self(Configuration::fromArray($config));
+        $tokenCache = null;
+        if (isset($config['token_cache_path'])) {
+            $tokenCache = new TokenCache($config['token_cache_path']);
+        }
+
+        return new self(Configuration::fromArray($config), $tokenCache);
     }
 
     /**
      * Create client from JSON configuration file
      *
      * @param string $filePath
+     * @param string|null $tokenCachePath Optional path to token cache file
      * @return static
      */
-    public static function fromConfigFile(string $filePath): self
+    public static function fromConfigFile(string $filePath, ?string $tokenCachePath = null): self
     {
-        return new self(Configuration::fromJsonFile($filePath));
+        $tokenCache = $tokenCachePath !== null ? new TokenCache($tokenCachePath) : null;
+        return new self(Configuration::fromJsonFile($filePath), $tokenCache);
     }
 
     /**
@@ -227,21 +237,32 @@ class CDiscountClient
     /**
      * Authenticate and get access token
      *
+     * @param bool $forceRefresh Force a new token request
      * @return string
      */
-    public function authenticate(): string
+    public function authenticate(bool $forceRefresh = false): string
     {
-        return $this->httpClient->authenticate();
+        return $this->httpClient->authenticate($forceRefresh);
     }
 
     /**
-     * Clear authentication token
+     * Refresh the token (force new token request)
+     *
+     * @return string
+     */
+    public function refreshToken(): string
+    {
+        return $this->httpClient->refreshToken();
+    }
+
+    /**
+     * Clear authentication token (both memory and file cache)
      *
      * @return $this
      */
     public function clearToken(): self
     {
-        $this->config->clearToken();
+        $this->httpClient->clearAllTokens();
         return $this;
     }
 
@@ -252,6 +273,17 @@ class CDiscountClient
      */
     public function isAuthenticated(): bool
     {
-        return $this->config->isTokenValid();
+        return $this->config->isTokenValid() ||
+            $this->httpClient->getTokenCache()->hasValidToken($this->config->getClientId());
+    }
+
+    /**
+     * Get token information for debugging
+     *
+     * @return array
+     */
+    public function getTokenInfo(): array
+    {
+        return $this->httpClient->getTokenInfo();
     }
 }

@@ -18,6 +18,10 @@ Thumbs.db
 # Configuration files with credentials
 config.json
 
+# Token cache files
+.cdiscount_token_cache.json
+*_token_cache.json
+
 # Log files
 *.log
 
